@@ -1,5 +1,5 @@
 script_name("VelocityUI")
-local script_version = 1.0
+local script_version = 1.1
 
 local samp = require 'lib.samp.events'
 local imgui = require 'mimgui'
@@ -14,16 +14,21 @@ local io = require 'io'
 encoding.default = 'CP1251'
 local u8 = encoding.UTF8
 
+local processTextDraw 
+
 local cfg = inicfg.load({
     main = {
-        enabled = true,
+        enabled = false,
         autoUpdate = true
     },
     speedo = {
         mode = 1,
         redlineColor = 1,
         posX = -1.0,
-        posY = -1.0
+        posY = -1.0,
+        colorOverSpeed = true,
+        warnLowFuel = true,
+        lowFuelThreshold = 3
     },
     zone = {
         minX = 0.0,
@@ -39,7 +44,17 @@ local selStartX, selStartY = 0, 0
 local selEndX, selEndY = 0, 0
 
 local activeTempFiles = {}
-local updateUrl = "https://raw.githubusercontent.com/USER/REPO/main/update.json" 
+local updateUrl = "https://raw.githubusercontent.com/kaip0v/VelocityUI/refs/heads/main/update.json"
+
+local tempSysNotifText = nil
+local tempSysNotifTimer = 0
+local tempSysNotifType = 0
+
+local function showSystemNotification(text, nType)
+    tempSysNotifText = text
+    tempSysNotifType = nType or 0
+    tempSysNotifTimer = os.clock() + 3.0
+end
 
 local carData = {
     show = imgui.new.bool(false),
@@ -101,13 +116,19 @@ function checkUpdates()
             
             if content and content ~= "" then
                 local data = nil
-                pcall(function()
-                    local func = load("return " .. content)
-                    if func then data = func() end
-                end)
+                local ok, res = pcall(decodeJson, content)
+                if ok and type(res) == "table" then
+                    data = res
+                else
+                    pcall(function()
+                        local func = load("return " .. content)
+                        if func then data = func() end
+                    end)
+                end
+                
                 if data and data.version and data.url then
                     if tonumber(data.version) > tonumber(script_version) then
-                        sampAddChatMessage("{00FF00}[VelocityUI] {FFFFFF}Найдено обновление! Загрузка...", -1)
+                        showSystemNotification(u8"Найдено обновление! Загрузка...", 3)
                         lua_thread.create(function()
                             wait(100)
                             local scriptPath = thisScript().path
@@ -127,13 +148,17 @@ function checkUpdates()
                                         if fOut then
                                             fOut:write(newCode)
                                             fOut:close()
-                                            sampAddChatMessage("{00FF00}[VelocityUI] {FFFFFF}Успешно обновлено! Перезапуск...", -1)
+                                            showSystemNotification(u8"Успешно обновлено! Перезапуск...", 1)
                                             lua_thread.create(function()
                                                 wait(1500)
                                                 thisScript():reload()
                                             end)
                                         end
                                     end
+                                elseif status2 == dlstatus.STATUS_EX_ERROR then
+                                    pcall(os.remove, tempPath)
+                                    activeTempFiles[tempPath] = nil
+                                    showSystemNotification(u8"Ошибка при скачивании обновления!", 2)
                                 end
                             end)
                         end)
@@ -146,6 +171,34 @@ function checkUpdates()
         end
     end)
 end
+
+local notif_frame = imgui.OnFrame(
+    function() return tempSysNotifText ~= nil and os.clock() < tempSysNotifTimer end,
+    function(player)
+        local resX, resY = getScreenResolution()
+        imgui.SetNextWindowPos(imgui.ImVec2(resX - 20, resY - 20), imgui.Cond.Always, imgui.ImVec2(1.0, 1.0))
+        
+        local borderColor = imgui.ImVec4(0.25, 0.25, 0.25, 1.0)
+        if tempSysNotifType == 1 then borderColor = imgui.ImVec4(0.20, 0.80, 0.20, 0.80)
+        elseif tempSysNotifType == 2 then borderColor = imgui.ImVec4(0.80, 0.20, 0.20, 0.80)
+        elseif tempSysNotifType == 3 then borderColor = imgui.ImVec4(0.20, 0.60, 0.90, 0.80) end
+
+        imgui.PushStyleColor(imgui.Col.WindowBg, imgui.ImVec4(0.12, 0.12, 0.12, 0.95))
+        imgui.PushStyleColor(imgui.Col.Border, borderColor)
+        imgui.PushStyleColor(imgui.Col.Text, imgui.ImVec4(0.9, 0.9, 0.9, 1.0))
+        imgui.PushStyleVarFloat(imgui.StyleVar.WindowRounding, 6.0)
+        imgui.PushStyleVarFloat(imgui.StyleVar.WindowBorderSize, 1.0)
+        imgui.PushStyleVarVec2(imgui.StyleVar.WindowPadding, imgui.ImVec2(15, 10))
+
+        local flags = imgui.WindowFlags.NoTitleBar + imgui.WindowFlags.NoResize + imgui.WindowFlags.NoMove + imgui.WindowFlags.NoScrollbar + imgui.WindowFlags.AlwaysAutoResize + imgui.WindowFlags.NoFocusOnAppearing + imgui.WindowFlags.NoInputs
+        if imgui.Begin("##SysIndicator", nil, flags) then
+            imgui.Text(tempSysNotifText)
+            imgui.End()
+        end
+        imgui.PopStyleVar(3)
+        imgui.PopStyleColor(3)
+    end
+)
 
 local settings_frame = imgui.OnFrame(
     function() return showSettings[0] or isSelectingZone end,
@@ -170,87 +223,151 @@ local settings_frame = imgui.OnFrame(
                 dlList:AddRectFilled(imgui.ImVec2(minX, minY), imgui.ImVec2(maxX, maxY), 0x500000FF)
                 dlList:AddRect(imgui.ImVec2(minX, minY), imgui.ImVec2(maxX, maxY), 0xFF0000FF, 0.0, 0, 2.0)
             elseif imgui.IsMouseReleased(0) then
-                cfg.zone.minX = math.min(selStartX, selEndX)
-                cfg.zone.maxX = math.max(selStartX, selEndX)
-                cfg.zone.minY = math.min(selStartY, selEndY)
-                cfg.zone.maxY = math.max(selStartY, selEndY)
+                local convX = 640.0 / resX
+                local convY = 480.0 / resY
+                cfg.zone.minX = math.min(selStartX, selEndX) * convX
+                cfg.zone.maxX = math.max(selStartX, selEndX) * convX
+                cfg.zone.minY = math.min(selStartY, selEndY) * convY
+                cfg.zone.maxY = math.max(selStartY, selEndY) * convY
                 inicfg.save(cfg, 'VelocityUI.ini')
                 isSelectingZone = false
                 showSettings[0] = true
+
+                for id = 0, 2304 do
+                    if sampTextdrawIsExists(id) then
+                        local text = sampTextdrawGetString(id)
+                        local letX, letY, color = sampTextdrawGetLetterSizeAndColor(id)
+                        local px, py = sampTextdrawGetPos(id)
+                        if processTextDraw(id, text, {x = px, y = py}, letY or 0) then
+                            sampTextdrawDelete(id)
+                        end
+                    end
+                end
             end
             return
         end
 
         imgui.SetNextWindowPos(imgui.ImVec2(resX / 2, resY / 2), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
-        imgui.SetNextWindowSize(imgui.ImVec2(500, 350), imgui.Cond.FirstUseEver)
+        imgui.SetNextWindowSize(imgui.ImVec2(500, 330), imgui.Cond.FirstUseEver)
         
         imgui.PushStyleVarFloat(imgui.StyleVar.FrameRounding, 6.0)
         imgui.PushStyleVarFloat(imgui.StyleVar.ChildRounding, 6.0)
         imgui.PushStyleVarFloat(imgui.StyleVar.WindowRounding, 8.0)
 
         if imgui.Begin("VelocityUI Settings", showSettings, imgui.WindowFlags.NoCollapse) then
+            local zoneSet = (cfg.zone.maxX > 0.0 and cfg.zone.maxY > 0.0)
+            local winWidth = imgui.GetWindowWidth()
+            local curY = imgui.GetCursorPosY()
+            local checkboxW = imgui.CalcTextSize(u8"Автообновление").x + imgui.GetFrameHeight() + imgui.GetStyle().ItemInnerSpacing.x + 20
+
+            imgui.SetCursorPos(imgui.ImVec2(winWidth - checkboxW - 20, curY))
+            
+            local bUpdate = imgui.new.bool(cfg.main.autoUpdate)
+            if imgui.Checkbox(u8"Автообновление", bUpdate) then
+                cfg.main.autoUpdate = bUpdate[0]
+                inicfg.save(cfg, 'VelocityUI.ini')
+            end
+            
+            imgui.SetCursorPosY(curY)
+
             if imgui.BeginTabBar("SettingsTabs") then
                 
                 if imgui.BeginTabItem(u8"Спидометр") then
                     imgui.Spacing()
                     
                     local bEnabled = imgui.new.bool(cfg.main.enabled)
-                    if imgui.Checkbox(u8"Включить кастомный спидометр", bEnabled) then
+                    if not zoneSet then
+                        imgui.PushStyleColor(imgui.Col.Text, imgui.ImVec4(0.5, 0.5, 0.5, 1.0))
+                    end
+                    
+                    local clicked = imgui.Checkbox(u8"Включить кастомный спидометр", bEnabled)
+                    
+                    if not zoneSet then
+                        imgui.PopStyleColor()
+                        if clicked then bEnabled[0] = false end
+                        imgui.SameLine()
+                        imgui.TextColored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), u8"(Сначала выделите зону!)")
+                    elseif clicked then
                         cfg.main.enabled = bEnabled[0]
                         inicfg.save(cfg, 'VelocityUI.ini')
                     end
                     
                     imgui.Spacing()
-                    imgui.Separator()
-                    imgui.Spacing()
 
-                    imgui.Text(u8"Режим полосы:")
-                    local rMode1 = imgui.new.bool(cfg.speedo.mode == 1)
-                    local rMode2 = imgui.new.bool(cfg.speedo.mode == 2)
-                    if imgui.RadioButton(u8"Тахометр (Обороты)", rMode1) then
-                        cfg.speedo.mode = 1
-                        inicfg.save(cfg, 'VelocityUI.ini')
-                    end
+                    imgui.Text(u8"Зона удаления серверного спидометра:")
                     imgui.SameLine()
-                    if imgui.RadioButton(u8"Состояние (ХП авто)", rMode2) then
-                        cfg.speedo.mode = 2
-                        inicfg.save(cfg, 'VelocityUI.ini')
+                    if zoneSet then
+                        imgui.TextColored(imgui.ImVec4(0.0, 1.0, 0.0, 1.0), u8"Выделена")
+                    else
+                        imgui.TextColored(imgui.ImVec4(1.0, 0.0, 0.0, 1.0), u8"Не выделена")
                     end
 
-                    imgui.Spacing()
-
-                    imgui.Text(u8"Цвет активных делений:")
-                    local rCol1 = imgui.new.bool(cfg.speedo.redlineColor == 1)
-                    local rCol2 = imgui.new.bool(cfg.speedo.redlineColor == 2)
-                    if imgui.RadioButton(u8"Красный", rCol1) then
-                        cfg.speedo.redlineColor = 1
-                        inicfg.save(cfg, 'VelocityUI.ini')
-                    end
-                    imgui.SameLine()
-                    if imgui.RadioButton(u8"Белый", rCol2) then
-                        cfg.speedo.redlineColor = 2
-                        inicfg.save(cfg, 'VelocityUI.ini')
-                    end
-
-                    imgui.Spacing()
-                    imgui.Separator()
-                    imgui.Spacing()
-
-                    imgui.Text(u8"Удаление серверного спидометра:")
-                    if imgui.Button(u8"Выделить зону мышью", imgui.ImVec2(0, 0)) then
+                    if imgui.Button(u8"Выделить зону мышью") then
                         showSettings[0] = false
                         isSelectingZone = true
                     end
-                    
-                    imgui.Spacing()
-                    imgui.Separator()
-                    imgui.Spacing()
-                    
-                    local bUpdate = imgui.new.bool(cfg.main.autoUpdate)
-                    if imgui.Checkbox(u8"Автообновление скрипта", bUpdate) then
-                        cfg.main.autoUpdate = bUpdate[0]
+                    imgui.SameLine()
+                    if imgui.Button(u8"Сбросить положение") then
+                        cfg.zone.minX = 0.0
+                        cfg.zone.maxX = 0.0
+                        cfg.zone.minY = 0.0
+                        cfg.zone.maxY = 0.0
+                        cfg.main.enabled = false
                         inicfg.save(cfg, 'VelocityUI.ini')
                     end
+                    
+                    imgui.Spacing()
+
+                    imgui.Text(u8"Режим полосы:")
+                    local modes = {u8"Тахометр (Обороты)", u8"Состояние (ХП авто)"}
+                    imgui.PushItemWidth(250)
+                    if imgui.BeginCombo("##ModeCombo", modes[cfg.speedo.mode]) then
+                        for i, v in ipairs(modes) do
+                            if imgui.Selectable(v, cfg.speedo.mode == i) then
+                                cfg.speedo.mode = i
+                                inicfg.save(cfg, 'VelocityUI.ini')
+                            end
+                        end
+                        imgui.EndCombo()
+                    end
+                    imgui.PopItemWidth()
+
+                    imgui.Spacing()
+
+                    local bWhite = imgui.new.bool(cfg.speedo.redlineColor == 2)
+                    if imgui.Checkbox(u8"Перекраска красных полос в белый", bWhite) then
+                        cfg.speedo.redlineColor = bWhite[0] and 2 or 1
+                        inicfg.save(cfg, 'VelocityUI.ini')
+                    end
+                    
+                    imgui.Spacing()
+
+                    local bOverSpeed = imgui.new.bool(cfg.speedo.colorOverSpeed)
+                    if imgui.Checkbox(u8"Окрашивать цифры спидометра в красный при превышении макс. скорости", bOverSpeed) then
+                        cfg.speedo.colorOverSpeed = bOverSpeed[0]
+                        inicfg.save(cfg, 'VelocityUI.ini')
+                    end
+                    
+                    imgui.Spacing()
+
+                    local bLowFuel = imgui.new.bool(cfg.speedo.warnLowFuel)
+                    if imgui.Checkbox(u8"Мигание индикатора топлива при низком уровне", bLowFuel) then
+                        cfg.speedo.warnLowFuel = bLowFuel[0]
+                        inicfg.save(cfg, 'VelocityUI.ini')
+                    end
+                    imgui.SameLine()
+                    imgui.Text(u8"(при <=")
+                    imgui.SameLine(0, 4)
+                    imgui.PushItemWidth(40)
+                    local iFuel = imgui.new.int(cfg.speedo.lowFuelThreshold)
+                    if imgui.InputInt("##FuelLimit", iFuel, 0, 0) then
+                        if iFuel[0] < 0 then iFuel[0] = 0 end
+                        cfg.speedo.lowFuelThreshold = iFuel[0]
+                        inicfg.save(cfg, 'VelocityUI.ini')
+                    end
+                    imgui.PopItemWidth()
+                    imgui.SameLine(0, 4)
+                    imgui.Text(u8"л.)")
 
                     imgui.EndTabItem()
                 end
@@ -314,6 +431,7 @@ local new_frame = imgui.OnFrame(
             local rpm = 0.0
             local hpPct = 1.0
             local localSpeedFloat = 0.0
+            local isOverSpeed = false
 
             local res, car = pcall(storeCarCharIsInNoSave, PLAYER_PED)
             if res and car then
@@ -325,7 +443,12 @@ local new_frame = imgui.OnFrame(
                         localSpeedFloat = math.sqrt(vx^2 + vy^2) * 2.0
                         currentSpeed = math.floor(localSpeedFloat)
                         
-                        maxSpeed = maxSpeeds[carModel] or 120.0
+                        local originalMaxSpeed = maxSpeeds[carModel] or 120.0
+                        if currentSpeed > originalMaxSpeed then
+                            isOverSpeed = true
+                        end
+                        
+                        maxSpeed = originalMaxSpeed
                         if currentSpeed > maxSpeed then maxSpeed = currentSpeed end
 
                         local healthRes, health = pcall(getCarHealth, car)
@@ -379,7 +502,14 @@ local new_frame = imgui.OnFrame(
             local curX = startX
             for i = 1, #fullStr do
                 local char = fullStr:sub(i, i)
-                local col = (i <= zeroesCount) and 0x35FFFFFF or 0xFFFFFFFF
+                local col = 0xFFFFFFFF
+                
+                if cfg.speedo.colorOverSpeed and isOverSpeed then
+                    col = (i <= zeroesCount) and 0x350000FF or 0xFF0000FF
+                else
+                    col = (i <= zeroesCount) and 0x35FFFFFF or 0xFFFFFFFF
+                end
+                
                 dl:AddText(imgui.ImVec2(curX, digitY), col, char)
                 curX = curX + imgui.CalcTextSize(char).x
             end
@@ -482,15 +612,27 @@ local new_frame = imgui.OnFrame(
             dl:AddText(imgui.ImVec2(mileStartX, textY), 0xFFFFFFFF, mileStr)
             dl:AddText(imgui.ImVec2(mileStartX + mileSz.x + innerGap, roadIconY), 0xFFAAAAAA, icons.ROAD)
             
-            local fuelStr = tostring(math.floor(tonumber(carData.fuel) or 0)) .. " L"
+            local fuelVal = math.floor(tonumber(carData.fuel) or 0)
+            local fuelStr = tostring(fuelVal) .. " L"
             local fSz = imgui.CalcTextSize(fuelStr)
             local pumpSz = imgui.CalcTextSize(icons.GAS_PUMP)
             
             local fuelStartX = bX + bW + gap
             local pumpIconY = centerY - pumpSz.y / 2
             
-            dl:AddText(imgui.ImVec2(fuelStartX, pumpIconY), 0xFFAAAAAA, icons.GAS_PUMP)
-            dl:AddText(imgui.ImVec2(fuelStartX + pumpSz.x + innerGap, textY), 0xFFFFFFFF, fuelStr)
+            local pumpCol = 0xFFAAAAAA
+            local fCol = 0xFFFFFFFF
+            
+            if cfg.speedo.warnLowFuel and fuelVal <= cfg.speedo.lowFuelThreshold then
+                local t = math.floor(os.clock() * 1000)
+                if t % 1000 < 500 then
+                    pumpCol = 0xFF0000FF
+                    fCol = 0xFF0000FF
+                end
+            end
+            
+            dl:AddText(imgui.ImVec2(fuelStartX, pumpIconY), pumpCol, icons.GAS_PUMP)
+            dl:AddText(imgui.ImVec2(fuelStartX + pumpSz.x + innerGap, textY), fCol, fuelStr)
             
             if fontLabels then imgui.PopFont() end
 
@@ -538,12 +680,14 @@ imgui.OnInitialize(function()
     config.MergeMode = true
     
     fontSpeed = imgui.GetIO().Fonts:AddFontFromFileTTF(fontPath, 220.0, imgui.ImFontConfig(), globalWcharsNum)
+    
     fontLabels = imgui.GetIO().Fonts:AddFontFromFileTTF(fontPath, 26.0, imgui.ImFontConfig(), imgui.GetIO().Fonts:GetGlyphRangesDefault())
     imgui.GetIO().Fonts:AddFontFromFileTTF(getWorkingDirectory() .. '/resource/fonts/fa-solid-900.ttf', 24.0, config, globalWcharsIcon)
+    
     fontGears = imgui.GetIO().Fonts:AddFontFromFileTTF(fontPath, 30.0, imgui.ImFontConfig(), imgui.GetIO().Fonts:GetGlyphRangesDefault())
 end)
 
-local function processTextDraw(id, text, pos, letY)
+processTextDraw = function(id, text, pos, letY)
     if not cfg.main.enabled then return false end
     if text == nil or pos == nil then return false end
 

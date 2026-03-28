@@ -27,8 +27,11 @@ local cfg = inicfg.load({
         posX = -1.0,
         posY = -1.0,
         colorOverSpeed = true,
+        overSpeedThreshold = 2,
         warnLowFuel = true,
-        lowFuelThreshold = 3
+        lowFuelThreshold = 3,
+        gearAsFirstDigit = false,
+        showDecimals = false
     },
     zone = {
         minX = 0.0,
@@ -42,6 +45,7 @@ local showSettings = imgui.new.bool(false)
 local isSelectingZone = false
 local selStartX, selStartY = 0, 0
 local selEndX, selEndY = 0, 0
+local forceSpeedoReset = false
 
 local activeTempFiles = {}
 local updateUrl = "https://raw.githubusercontent.com/kaip0v/VelocityUI/refs/heads/main/update.json"
@@ -66,8 +70,30 @@ local carData = {
     fuel = "0"
 }
 
+-- Эталонная таблица максимальных скоростей из PAWN
 local maxSpeeds = {
-    [400]=98, [401]=91, [402]=116, [403]=68, [404]=81, [405]=99, [406]=88, [407]=98, [408]=78, [409]=90, [410]=91, [411]=138, [412]=93, [413]=88, [414]=90, [415]=120, [416]=62, [417]=105, [418]=81, [419]=93, [420]=98, [421]=93, [422]=90, [423]=81, [424]=93, [425]=124, [426]=105, [427]=93, [428]=93, [429]=110, [430]=98, [431]=81, [432]=81, [433]=93, [434]=110, [435]=81, [436]=93, [437]=81, [438]=93, [439]=105, [440]=93, [441]=90, [442]=75, [443]=93, [444]=100, [445]=98, [446]=93, [447]=93, [448]=81, [449]=93, [450]=93, [451]=120, [452]=93, [453]=81, [454]=81, [455]=105, [456]=93, [457]=93, [458]=98, [459]=90, [460]=93, [461]=105, [462]=105, [463]=105, [464]=81, [465]=81, [466]=105, [467]=105, [468]=105, [469]=93, [470]=105, [471]=105, [472]=93, [473]=93, [474]=98, [475]=98, [476]=110, [477]=105, [478]=98, [479]=98, [480]=98, [481]=93, [482]=105, [483]=93, [484]=93, [485]=93, [486]=93, [487]=93, [488]=93, [489]=105, [490]=105, [491]=93, [492]=105, [493]=93, [494]=110, [495]=105, [496]=105, [497]=93, [498]=93, [499]=93, [500]=105, [501]=93, [502]=105, [503]=105, [504]=105, [505]=98, [506]=110, [507]=90, [508]=105, [509]=93, [510]=93, [511]=105, [512]=105, [513]=93, [514]=93, [515]=105, [516]=98, [517]=98, [518]=98, [519]=93, [520]=93, [521]=105, [522]=105, [523]=105, [524]=93, [525]=93, [526]=105, [527]=105, [528]=105, [529]=105, [530]=93, [531]=93, [532]=93, [533]=105, [534]=105, [535]=105, [536]=105, [537]=93, [538]=93, [539]=105, [540]=105, [541]=126, [542]=105, [543]=93, [544]=98, [545]=105, [546]=105, [547]=105, [548]=93, [549]=105, [550]=105, [551]=105, [552]=105, [553]=130, [554]=105, [555]=105, [556]=105, [557]=105, [558]=105, [559]=105, [560]=94, [561]=105, [562]=105, [563]=93, [564]=93, [565]=105, [566]=105, [567]=105, [568]=105, [569]=105, [570]=105, [571]=105, [572]=105, [573]=105, [574]=93, [575]=105, [576]=105, [577]=105, [578]=105, [579]=105, [580]=105, [581]=105, [582]=105, [583]=105, [584]=105, [585]=105, [586]=105, [587]=105, [588]=105, [589]=105, [590]=105, [591]=105, [592]=105, [593]=105, [594]=105, [595]=105, [596]=105, [597]=105, [598]=105, [599]=105, [600]=105, [601]=105, [602]=105, [603]=105, [604]=105, [605]=105, [606]=105, [607]=105, [608]=105, [609]=105, [610]=105, [611]=105
+    [400]=84, [401]=85, [402]=104, [403]=56, [404]=65, [405]=86, [406]=62, [407]=85, [408]=71, [409]=82,
+    [410]=75, [411]=122, [412]=85, [413]=74, [414]=75, [415]=107, [416]=56, [417]=86, [418]=71, [419]=75,
+    [420]=86, [421]=75, [422]=75, [423]=58, [424]=85, [425]=103, [426]=85, [427]=85, [428]=85, [429]=111,
+    [430]=86, [431]=71, [432]=71, [433]=85, [434]=103, [435]=71, [436]=75, [437]=71, [438]=75, [439]=86,
+    [440]=75, [441]=75, [442]=58, [443]=75, [444]=86, [445]=85, [446]=75, [447]=75, [448]=58, [449]=75,
+    [450]=75, [451]=107, [452]=75, [453]=58, [454]=58, [455]=86, [456]=75, [457]=75, [458]=86, [459]=71,
+    [460]=75, [461]=100, [462]=86, [463]=86, [464]=58, [465]=58, [466]=86, [467]=86, [468]=80, [469]=75,
+    [470]=86, [471]=60, [472]=75, [473]=75, [474]=86, [475]=86, [476]=103, [477]=96, [478]=86, [479]=86,
+    [480]=103, [481]=75, [482]=86, [483]=75, [484]=75, [485]=75, [486]=75, [487]=75, [488]=75, [489]=77,
+    [490]=86, [491]=75, [492]=86, [493]=75, [494]=103, [495]=98, [496]=86, [497]=75, [498]=75, [499]=75,
+    [500]=86, [501]=75, [502]=86, [503]=86, [504]=86, [505]=77, [506]=103, [507]=71, [508]=86, [509]=75,
+    [510]=75, [511]=86, [512]=86, [513]=75, [514]=75, [515]=86, [516]=86, [517]=86, [518]=86, [519]=75,
+    [520]=75, [521]=95, [522]=108, [523]=86, [524]=75, [525]=75, [526]=86, [527]=86, [528]=86, [529]=86,
+    [530]=75, [531]=75, [532]=75, [533]=86, [534]=86, [535]=86, [536]=86, [537]=75, [538]=75, [539]=86,
+    [540]=86, [541]=112, [542]=86, [543]=75, [544]=86, [545]=86, [546]=86, [547]=86, [548]=75, [549]=85,
+    [550]=86, [551]=86, [552]=86, [553]=103, [554]=86, [555]=86, [556]=86, [557]=86, [558]=92, [559]=92,
+    [560]=94, [561]=92, [562]=92, [563]=75, [564]=75, [565]=86, [566]=86, [567]=86, [568]=86, [569]=86,
+    [570]=86, [571]=86, [572]=86, [573]=86, [574]=75, [575]=86, [576]=86, [577]=86, [578]=86, [579]=86,
+    [580]=86, [581]=86, [582]=86, [583]=86, [584]=86, [585]=86, [586]=86, [587]=86, [588]=86, [589]=86,
+    [590]=86, [591]=86, [592]=86, [593]=86, [594]=86, [595]=86, [596]=86, [597]=86, [598]=86, [599]=86,
+    [600]=86, [601]=86, [602]=86, [603]=86, [604]=86, [605]=86, [606]=86, [607]=86, [608]=86, [609]=86,
+    [610]=86, [611]=86
 }
 
 local speedTdId = -1
@@ -83,6 +109,17 @@ local icons = {
 
 local globalWcharsNum = imgui.new.ImWchar[3](0x0020, 0x0039, 0)
 local globalWcharsIcon = imgui.new.ImWchar[3](0xF000, 0xF8FF, 0)
+
+-- Функция для всплывающих подсказок при наведении
+local function Tooltip(text)
+    if imgui.IsItemHovered() then
+        imgui.BeginTooltip()
+        imgui.PushTextWrapPos(imgui.GetFontSize() * 25.0)
+        imgui.TextUnformatted(text)
+        imgui.PopTextWrapPos()
+        imgui.EndTooltip()
+    end
+end
 
 local function cleanupGhostFiles()
     local cfgPath = getWorkingDirectory() .. '\\config\\'
@@ -248,7 +285,7 @@ local settings_frame = imgui.OnFrame(
         end
 
         imgui.SetNextWindowPos(imgui.ImVec2(resX / 2, resY / 2), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
-        imgui.SetNextWindowSize(imgui.ImVec2(500, 330), imgui.Cond.FirstUseEver)
+        imgui.SetNextWindowSize(imgui.ImVec2(500, 420), imgui.Cond.FirstUseEver)
         
         imgui.PushStyleVarFloat(imgui.StyleVar.FrameRounding, 6.0)
         imgui.PushStyleVarFloat(imgui.StyleVar.ChildRounding, 6.0)
@@ -256,130 +293,152 @@ local settings_frame = imgui.OnFrame(
 
         if imgui.Begin("VelocityUI Settings", showSettings, imgui.WindowFlags.NoCollapse) then
             local zoneSet = (cfg.zone.maxX > 0.0 and cfg.zone.maxY > 0.0)
-            local winWidth = imgui.GetWindowWidth()
-            local curY = imgui.GetCursorPosY()
-            local checkboxW = imgui.CalcTextSize(u8"Автообновление").x + imgui.GetFrameHeight() + imgui.GetStyle().ItemInnerSpacing.x + 20
-
-            imgui.SetCursorPos(imgui.ImVec2(winWidth - checkboxW - 20, curY))
             
+            local bEnabled = imgui.new.bool(cfg.main.enabled)
+            if imgui.Checkbox(u8"Включить спидометр", bEnabled) then
+                cfg.main.enabled = bEnabled[0]
+                inicfg.save(cfg, 'VelocityUI.ini')
+            end
+            Tooltip(u8"Включает или выключает отображение кастомного спидометра на экране.")
+            
+            imgui.Spacing()
+
+            imgui.Text(u8"Зона скрытия текстдрава:")
+            Tooltip(u8"Область на экране, где находится серверный спидометр. Скрипт будет автоматически скрывать всё, что попадает в эту зону.")
+            
+            imgui.SameLine()
+            if zoneSet then
+                imgui.TextColored(imgui.ImVec4(0.0, 1.0, 0.0, 1.0), u8"Выделена")
+            else
+                imgui.TextColored(imgui.ImVec4(1.0, 0.0, 0.0, 1.0), u8"Не выделена")
+            end
+
+            if imgui.Button(u8"Выделить зону мышью") then
+                showSettings[0] = false
+                isSelectingZone = true
+            end
+            Tooltip(u8"Позволяет вручную обвести серверный спидометр рамкой на экране, чтобы скрыть его.")
+            
+            imgui.SameLine()
+            if imgui.Button(u8"Сбросить зону") then
+                cfg.zone.minX = 0.0
+                cfg.zone.maxX = 0.0
+                cfg.zone.minY = 0.0
+                cfg.zone.maxY = 0.0
+                inicfg.save(cfg, 'VelocityUI.ini')
+            end
+            Tooltip(u8"Отменяет скрытие серверного спидометра (он снова появится).")
+
+            if imgui.Button(u8"Сбросить позицию спидометра") then
+                forceSpeedoReset = true
+            end
+            Tooltip(u8"Возвращает окно кастомного спидометра в стандартное положение (правый нижний угол экрана).")
+            
+            imgui.Spacing()
+
+            imgui.Text(u8"Режим полосы:")
+            local modes = {u8"Тахометр (Обороты)", u8"Состояние (ХП авто)"}
+            imgui.PushItemWidth(250)
+            if imgui.BeginCombo("##ModeCombo", modes[cfg.speedo.mode]) then
+                for i, v in ipairs(modes) do
+                    if imgui.Selectable(v, cfg.speedo.mode == i) then
+                        cfg.speedo.mode = i
+                        inicfg.save(cfg, 'VelocityUI.ini')
+                    end
+                end
+                imgui.EndCombo()
+            end
+            imgui.PopItemWidth()
+            Tooltip(u8"Определяет, что будет показывать нижняя шкала под спидометром: обороты двигателя (RPM) или целостность автомобиля (HP).")
+
+            imgui.Spacing()
+
+            local bWhite = imgui.new.bool(cfg.speedo.redlineColor == 2)
+            if imgui.Checkbox(u8"Белые секции в конце шкалы", bWhite) then
+                cfg.speedo.redlineColor = bWhite[0] and 2 or 1
+                inicfg.save(cfg, 'VelocityUI.ini')
+            end
+            Tooltip(u8"Перекрашивает последние (красные) деления заполняющейся шкалы в белый цвет.")
+            
+            imgui.Spacing()
+
+            local bOverSpeed = imgui.new.bool(cfg.speedo.colorOverSpeed)
+            if imgui.Checkbox(u8"Красные цифры при превышении", bOverSpeed) then
+                cfg.speedo.colorOverSpeed = bOverSpeed[0]
+                inicfg.save(cfg, 'VelocityUI.ini')
+            end
+            Tooltip(u8"Окрашивает главные цифры скорости в красный цвет, когда вы превышаете предельную скорость автомобиля.")
+            
+            if cfg.speedo.colorOverSpeed then
+                imgui.SameLine()
+                imgui.Text(u8"(Порог: +")
+                imgui.SameLine(0, 4)
+                imgui.PushItemWidth(40)
+                local iThresh = imgui.new.int(cfg.speedo.overSpeedThreshold or 2)
+                if imgui.InputInt("##OverSpeedThresh", iThresh, 0, 0) then
+                    if iThresh[0] < 0 then iThresh[0] = 0 end
+                    cfg.speedo.overSpeedThreshold = iThresh[0]
+                    inicfg.save(cfg, 'VelocityUI.ini')
+                end
+                imgui.PopItemWidth()
+                Tooltip(u8"Допустимое превышение скорости (в милях/ч), после которого цвет изменится на красный.\nНе может быть меньше 0.\nСтандартное значение: 2")
+                imgui.SameLine(0, 4)
+                imgui.Text(u8"миль)")
+            end
+            
+            imgui.Spacing()
+
+            local bLowFuel = imgui.new.bool(cfg.speedo.warnLowFuel)
+            if imgui.Checkbox(u8"Предупреждение о топливе", bLowFuel) then
+                cfg.speedo.warnLowFuel = bLowFuel[0]
+                inicfg.save(cfg, 'VelocityUI.ini')
+            end
+            Tooltip(u8"Иконка бензоколонки начнёт мигать красным цветом, если уровень топлива опустится до указанного значения или ниже.")
+            
+            imgui.SameLine()
+            imgui.Text(u8"(при <=")
+            imgui.SameLine(0, 4)
+            imgui.PushItemWidth(40)
+            local iFuel = imgui.new.int(cfg.speedo.lowFuelThreshold)
+            if imgui.InputInt("##FuelLimit", iFuel, 0, 0) then
+                if iFuel[0] < 0 then iFuel[0] = 0 end
+                cfg.speedo.lowFuelThreshold = iFuel[0]
+                inicfg.save(cfg, 'VelocityUI.ini')
+            end
+            imgui.PopItemWidth()
+            Tooltip(u8"Порог уровня бензина в литрах для срабатывания мигания.")
+            imgui.SameLine(0, 4)
+            imgui.Text(u8"л.)")
+
+            imgui.Spacing()
+
+            local bGearDigit = imgui.new.bool(cfg.speedo.gearAsFirstDigit)
+            if imgui.Checkbox(u8"Показывать передачу вместо 1-го нуля", bGearDigit) then
+                cfg.speedo.gearAsFirstDigit = bGearDigit[0]
+                inicfg.save(cfg, 'VelocityUI.ini')
+            end
+            Tooltip(u8"Если скорость меньше 100 миль/ч, первая (серая) цифра спидометра будет показывать текущую передачу.")
+            
+            imgui.Spacing()
+
+            local bDecimals = imgui.new.bool(cfg.speedo.showDecimals)
+            if imgui.Checkbox(u8"Десятые доли (пробег и бензин)", bDecimals) then
+                cfg.speedo.showDecimals = bDecimals[0]
+                inicfg.save(cfg, 'VelocityUI.ini')
+            end
+            Tooltip(u8"Отображает значения пробега и уровня топлива с точностью до одной десятой (например, 43.8).")
+
+            imgui.Spacing()
+            imgui.Separator()
+            imgui.Spacing()
+
             local bUpdate = imgui.new.bool(cfg.main.autoUpdate)
             if imgui.Checkbox(u8"Автообновление", bUpdate) then
                 cfg.main.autoUpdate = bUpdate[0]
                 inicfg.save(cfg, 'VelocityUI.ini')
             end
-            
-            imgui.SetCursorPosY(curY)
+            Tooltip(u8"Скрипт будет автоматически проверять наличие новых версий и устанавливать их.")
 
-            if imgui.BeginTabBar("SettingsTabs") then
-                
-                if imgui.BeginTabItem(u8"Спидометр") then
-                    imgui.Spacing()
-                    
-                    local bEnabled = imgui.new.bool(cfg.main.enabled)
-                    if not zoneSet then
-                        imgui.PushStyleColor(imgui.Col.Text, imgui.ImVec4(0.5, 0.5, 0.5, 1.0))
-                    end
-                    
-                    local clicked = imgui.Checkbox(u8"Включить кастомный спидометр", bEnabled)
-                    
-                    if not zoneSet then
-                        imgui.PopStyleColor()
-                        if clicked then bEnabled[0] = false end
-                        imgui.SameLine()
-                        imgui.TextColored(imgui.ImVec4(1.0, 0.4, 0.4, 1.0), u8"(Сначала выделите зону!)")
-                    elseif clicked then
-                        cfg.main.enabled = bEnabled[0]
-                        inicfg.save(cfg, 'VelocityUI.ini')
-                    end
-                    
-                    imgui.Spacing()
-
-                    imgui.Text(u8"Зона удаления серверного спидометра:")
-                    imgui.SameLine()
-                    if zoneSet then
-                        imgui.TextColored(imgui.ImVec4(0.0, 1.0, 0.0, 1.0), u8"Выделена")
-                    else
-                        imgui.TextColored(imgui.ImVec4(1.0, 0.0, 0.0, 1.0), u8"Не выделена")
-                    end
-
-                    if imgui.Button(u8"Выделить зону мышью") then
-                        showSettings[0] = false
-                        isSelectingZone = true
-                    end
-                    imgui.SameLine()
-                    if imgui.Button(u8"Сбросить положение") then
-                        cfg.zone.minX = 0.0
-                        cfg.zone.maxX = 0.0
-                        cfg.zone.minY = 0.0
-                        cfg.zone.maxY = 0.0
-                        cfg.main.enabled = false
-                        inicfg.save(cfg, 'VelocityUI.ini')
-                    end
-                    
-                    imgui.Spacing()
-
-                    imgui.Text(u8"Режим полосы:")
-                    local modes = {u8"Тахометр (Обороты)", u8"Состояние (ХП авто)"}
-                    imgui.PushItemWidth(250)
-                    if imgui.BeginCombo("##ModeCombo", modes[cfg.speedo.mode]) then
-                        for i, v in ipairs(modes) do
-                            if imgui.Selectable(v, cfg.speedo.mode == i) then
-                                cfg.speedo.mode = i
-                                inicfg.save(cfg, 'VelocityUI.ini')
-                            end
-                        end
-                        imgui.EndCombo()
-                    end
-                    imgui.PopItemWidth()
-
-                    imgui.Spacing()
-
-                    local bWhite = imgui.new.bool(cfg.speedo.redlineColor == 2)
-                    if imgui.Checkbox(u8"Перекраска красных полос в белый", bWhite) then
-                        cfg.speedo.redlineColor = bWhite[0] and 2 or 1
-                        inicfg.save(cfg, 'VelocityUI.ini')
-                    end
-                    
-                    imgui.Spacing()
-
-                    local bOverSpeed = imgui.new.bool(cfg.speedo.colorOverSpeed)
-                    if imgui.Checkbox(u8"Окрашивать цифры спидометра в красный при превышении макс. скорости", bOverSpeed) then
-                        cfg.speedo.colorOverSpeed = bOverSpeed[0]
-                        inicfg.save(cfg, 'VelocityUI.ini')
-                    end
-                    
-                    imgui.Spacing()
-
-                    local bLowFuel = imgui.new.bool(cfg.speedo.warnLowFuel)
-                    if imgui.Checkbox(u8"Мигание индикатора топлива при низком уровне", bLowFuel) then
-                        cfg.speedo.warnLowFuel = bLowFuel[0]
-                        inicfg.save(cfg, 'VelocityUI.ini')
-                    end
-                    imgui.SameLine()
-                    imgui.Text(u8"(при <=")
-                    imgui.SameLine(0, 4)
-                    imgui.PushItemWidth(40)
-                    local iFuel = imgui.new.int(cfg.speedo.lowFuelThreshold)
-                    if imgui.InputInt("##FuelLimit", iFuel, 0, 0) then
-                        if iFuel[0] < 0 then iFuel[0] = 0 end
-                        cfg.speedo.lowFuelThreshold = iFuel[0]
-                        inicfg.save(cfg, 'VelocityUI.ini')
-                    end
-                    imgui.PopItemWidth()
-                    imgui.SameLine(0, 4)
-                    imgui.Text(u8"л.)")
-
-                    imgui.EndTabItem()
-                end
-
-                if imgui.BeginTabItem(u8"HUD") then
-                    imgui.Spacing()
-                    imgui.Text(u8"В разработке...")
-                    imgui.EndTabItem()
-                end
-
-                imgui.EndTabBar()
-            end
             imgui.End()
         end
         imgui.PopStyleVar(3)
@@ -395,13 +454,16 @@ local new_frame = imgui.OnFrame(
         
         local winW, winH = 480, 310
 
-        if cfg.speedo.posX == -1.0 then
+        if cfg.speedo.posX == -1.0 or forceSpeedoReset then
             cfg.speedo.posX = resX - winW - 30
             cfg.speedo.posY = resY - winH - 30
+            imgui.SetNextWindowPos(imgui.ImVec2(cfg.speedo.posX, cfg.speedo.posY), imgui.Cond.Always)
             inicfg.save(cfg, 'VelocityUI.ini')
+            forceSpeedoReset = false
+        else
+            imgui.SetNextWindowPos(imgui.ImVec2(cfg.speedo.posX, cfg.speedo.posY), imgui.Cond.FirstUseEver)
         end
 
-        imgui.SetNextWindowPos(imgui.ImVec2(cfg.speedo.posX, cfg.speedo.posY), imgui.Cond.FirstUseEver)
         imgui.SetNextWindowSize(imgui.ImVec2(winW, winH), imgui.Cond.Always)
 
         imgui.PushStyleVarFloat(imgui.StyleVar.WindowBorderSize, 0.0)
@@ -441,10 +503,14 @@ local new_frame = imgui.OnFrame(
                     if modelRes and carModel then
                         local vx, vy, vz = getCarSpeedVector(car)
                         localSpeedFloat = math.sqrt(vx^2 + vy^2) * 2.0
-                        currentSpeed = math.floor(localSpeedFloat)
+                        currentSpeed = math.floor(localSpeedFloat + 0.5)
                         
-                        local originalMaxSpeed = maxSpeeds[carModel] or 120.0
-                        if currentSpeed > originalMaxSpeed then
+                        -- Берём эталонный лимит скорости из таблицы PAWN
+                        local originalMaxSpeed = maxSpeeds[carModel] or 85.0
+                        local overSpeedThreshold = cfg.speedo.overSpeedThreshold or 2
+                        
+                        -- Срабатывание красноты с учетом настраиваемого порога
+                        if currentSpeed >= originalMaxSpeed + overSpeedThreshold then
                             isOverSpeed = true
                         end
                         
@@ -487,11 +553,19 @@ local new_frame = imgui.OnFrame(
             local fullStr = string.format("%03d", currentSpeed)
             if #fullStr > 3 then fullStr = tostring(currentSpeed) end
             local zeroesCount = #fullStr - #speedStr
+            
+            local displayStr = fullStr
+            if cfg.speedo.gearAsFirstDigit and currentSpeed < 100 then
+                local gear = 0
+                local ok, veh = pcall(storeCarCharIsInNoSave, PLAYER_PED)
+                if ok and veh then gear = getCarCurrentGear(veh) end
+                displayStr = tostring(gear) .. string.format("%02d", currentSpeed)
+            end
 
             if fontSpeed then imgui.PushFont(fontSpeed) end
             local totalW = 0
-            for i = 1, #fullStr do
-                totalW = totalW + imgui.CalcTextSize(fullStr:sub(i, i)).x
+            for i = 1, #displayStr do
+                totalW = totalW + imgui.CalcTextSize(displayStr:sub(i, i)).x
             end
 
             local cx = p.x + (winW / 2)
@@ -500,8 +574,8 @@ local new_frame = imgui.OnFrame(
             local digitY = startY - 20
 
             local curX = startX
-            for i = 1, #fullStr do
-                local char = fullStr:sub(i, i)
+            for i = 1, #displayStr do
+                local char = displayStr:sub(i, i)
                 local col = 0xFFFFFFFF
                 
                 if cfg.speedo.colorOverSpeed and isOverSpeed then
@@ -597,7 +671,8 @@ local new_frame = imgui.OnFrame(
 
             if fontLabels then imgui.PushFont(fontLabels) end
             
-            local mileStr = tostring(math.floor(tonumber(carData.mile) or 0))
+            local mileNum = tonumber(carData.mile) or 0
+            local mileStr = cfg.speedo.showDecimals and string.format("%.1f", mileNum) or tostring(math.floor(mileNum))
             local mileSz = imgui.CalcTextSize(mileStr)
             local roadSz = imgui.CalcTextSize(icons.ROAD)
             
@@ -612,8 +687,9 @@ local new_frame = imgui.OnFrame(
             dl:AddText(imgui.ImVec2(mileStartX, textY), 0xFFFFFFFF, mileStr)
             dl:AddText(imgui.ImVec2(mileStartX + mileSz.x + innerGap, roadIconY), 0xFFAAAAAA, icons.ROAD)
             
-            local fuelVal = math.floor(tonumber(carData.fuel) or 0)
-            local fuelStr = tostring(fuelVal) .. " L"
+            local fuelNum = tonumber(carData.fuel) or 0
+            local fuelVal = math.floor(fuelNum)
+            local fuelStr = (cfg.speedo.showDecimals and string.format("%.1f", fuelNum) or tostring(fuelVal)) .. " L"
             local fSz = imgui.CalcTextSize(fuelStr)
             local pumpSz = imgui.CalcTextSize(icons.GAS_PUMP)
             

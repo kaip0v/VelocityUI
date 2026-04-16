@@ -1,5 +1,5 @@
 script_name("VelocityUI")
-local script_version = 1.2
+local script_version = 1.3
 local samp = require 'samp.events'
 local imgui = require 'mimgui'
 local encoding = require 'encoding'

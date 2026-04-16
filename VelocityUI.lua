@@ -1,5 +1,5 @@
 script_name("VelocityUI")
-local script_version = 1.3
+local script_version = 1.4
 local samp = require 'samp.events'
 local imgui = require 'mimgui'
 local encoding = require 'encoding'
@@ -918,13 +918,7 @@ local new_frame = imgui.OnFrame(
 )
 
 imgui.OnInitialize(function()
-    local fontPath = getWorkingDirectory() .. '\\cef\\MiSansLatin-Medium.ttf'
-    local f = io.open(fontPath, "r")
-    if not f then
-        fontPath = 'C:\\Windows\\Fonts\\arialbd.ttf'
-    else
-        f:close()
-    end
+    local fontPath = 'C:\\Windows\\Fonts\\arialbd.ttf'
 
     local config = imgui.ImFontConfig()
     config.MergeMode = true
@@ -932,6 +926,7 @@ imgui.OnInitialize(function()
     fontSpeed = imgui.GetIO().Fonts:AddFontFromFileTTF(fontPath, 220.0, imgui.ImFontConfig(), globalWcharsNum)
     
     fontLabels = imgui.GetIO().Fonts:AddFontFromFileTTF(fontPath, 26.0, imgui.ImFontConfig(), imgui.GetIO().Fonts:GetGlyphRangesDefault())
+    
     imgui.GetIO().Fonts:AddFontFromFileTTF(getWorkingDirectory() .. '/resource/fonts/fa-solid-900.ttf', 24.0, config, globalWcharsIcon)
     
     fontGears = imgui.GetIO().Fonts:AddFontFromFileTTF(fontPath, 30.0, imgui.ImFontConfig(), imgui.GetIO().Fonts:GetGlyphRangesDefault())

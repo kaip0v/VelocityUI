@@ -1,5 +1,5 @@
 script_name("VelocityUI")
-local script_version = 1.3
+local script_version = 1.2
 local samp = require 'samp.events'
 local imgui = require 'mimgui'
 local encoding = require 'encoding'
@@ -13,10 +13,8 @@ local u8 = encoding.UTF8
 
 local processTextDraw
 
--- Путь к нашему новому JSON конфигу
 local configPath = getWorkingDirectory() .. '\\config\\VelocityUI.json'
 
--- Дефолтные настройки
 local defaultCfg = {
     main = {
         enabled = false,
@@ -47,7 +45,6 @@ local defaultCfg = {
 
 local cfg = {}
 
--- Функция сохранения конфига
 local function saveConfig()
     local f = io.open(configPath, "w")
     if f then
@@ -56,9 +53,7 @@ local function saveConfig()
     end
 end
 
--- Умная загрузка конфига
 local function loadConfig()
-    -- Сначала заполняем рабочий конфиг дефолтными значениями
     for k, v in pairs(defaultCfg) do
         if type(v) == "table" then
             cfg[k] = {}
@@ -68,14 +63,12 @@ local function loadConfig()
         end
     end
 
-    -- Пытаемся прочитать файл
     local f = io.open(configPath, "r")
     if f then
         local content = f:read("*a")
         f:close()
         local ok, parsed = pcall(decodeJson, content)
         if ok and type(parsed) == "table" then
-            -- Если файл успешно прочитан, перезаписываем дефолтные значения сохраненными
             for k, v in pairs(parsed) do
                 if type(v) == "table" and type(cfg[k]) == "table" then
                     for k2, v2 in pairs(v) do
@@ -88,11 +81,9 @@ local function loadConfig()
             return
         end
     end
-    -- Если файла нет или он сломан, сохраняем чистый дефолтный
     saveConfig()
 end
 
--- Инициализируем настройки при запуске
 loadConfig()
 
 local showSettings = imgui.new.bool(false)
@@ -647,7 +638,6 @@ local new_frame = imgui.OnFrame(
                 isOverSpeed = calcData.isOverSpeed
                 gear = calcData.gear
             else
-                -- Старый тяжелый код без оптимизации (оставляем как запасной вариант)
                 local res, car = pcall(storeCarCharIsInNoSave, PLAYER_PED)
                 if res and car then
                     local existRes, exist = pcall(doesVehicleExist, car)
